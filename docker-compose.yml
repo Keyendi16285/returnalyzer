@@ -32,5 +32,5 @@ services:
 networks:
   shared_network:
     external: true
-    name: case-entry-form_default # Update this to match your actual network name
+    name: casetracker_default # Update this to match your actual network name
 
