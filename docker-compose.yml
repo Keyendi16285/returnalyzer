@@ -16,18 +16,18 @@ services:
     networks:
       - shared_network
 
-  ngrok-returnalyzer:
-    image: ngrok/ngrok:latest
-    restart: always
-    environment:
-      - NGROK_AUTHTOKEN=3AQuMZbbDsUNdeV1Yi6mkT1vcqA_2L87GR15U5hkH4eDpimsQ
-    command:
-      - "http"
-      - "returnalyzer-app:8000" # Points to the internal port of your new app
-    ports:
-      - "4041:4040" # Use 4041 because Case Tracker is using 4040
-    networks:
-      - shared_network
+  # ngrok-returnalyzer:
+  #   image: ngrok/ngrok:latest
+  #   restart: always
+  #   environment:
+  #     - NGROK_AUTHTOKEN=3AQuMZbbDsUNdeV1Yi6mkT1vcqA_2L87GR15U5hkH4eDpimsQ
+  #   command:
+  #     - "http"
+  #     - "returnalyzer-app:8000" # Points to the internal port of your new app
+  #   ports:
+  #     - "4041:4040" # Use 4041 because Case Tracker is using 4040
+  #   networks:
+  #     - shared_network
 
 networks:
   shared_network:
