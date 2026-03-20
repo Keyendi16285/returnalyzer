@@ -1,0 +1,36 @@
+services:
+  returnalyzer-app:
+    build: .
+    container_name: returnalyzer_web
+    ports:
+      # Use 8002 (or 8000) because 8001 is already taken by Case Tracker
+      - "8002:8000" 
+    volumes:
+      - .:/app
+    environment:
+      # We point to 'postgres_db' (the name of your Case Tracker DB container)
+      - DATABASE_URL=postgresql://postgres:casemanagement@postgres_db:5432/case_management
+    # This is crucial: it tells this container to join the same network as the DB
+    external_links:
+      - postgres_db:db 
+    networks:
+      - shared_network
+
+  ngrok-returnalyzer:
+    image: ngrok/ngrok:latest
+    restart: always
+    environment:
+      - NGROK_AUTHTOKEN=3AQuMZbbDsUNdeV1Yi6mkT1vcqA_2L87GR15U5hkH4eDpimsQ
+    command:
+      - "http"
+      - "returnalyzer-app:8000" # Points to the internal port of your new app
+    ports:
+      - "4041:4040" # Use 4041 because Case Tracker is using 4040
+    networks:
+      - shared_network
+
+networks:
+  shared_network:
+    external: true
+    name: case-entry-form_default # Update this to match your actual network name
+
