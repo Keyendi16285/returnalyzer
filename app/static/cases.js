@@ -101,7 +101,7 @@ function renderCaseRow(c) {
             
             <td class="p-3 text-slate-700 font-medium text-center">${formatCurrency(c.casewide_discussion)}</td>
 
-            <td class="p-3 text-slate-700 font-medium text-center">${formatCurrency(c.casewide_total)}</td>
+            <td class="p-3 text-slate-700 font-medium text-center">${formatCurrency(c.sum_case_values)}</td>
             
             <td class="p-3 bg-blue-50/50 font-bold text-blue-900">${formatCurrency(c.gross_value)}</td>
             
