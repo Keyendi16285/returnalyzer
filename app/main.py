@@ -26,7 +26,11 @@ app.add_middleware(
 @app.get("/api/cases", response_model=List[dict])
 def get_returnalyzer_data(session: Session = Depends(get_session)):
     # Fetch all CaseEntry records from the DB
-    statement = select(CaseEntry).options(selectinload(CaseEntry.defendants))
+    statement = (
+        select(CaseEntry)
+        .options(selectinload(CaseEntry.defendants))
+        .order_by(CaseEntry.id) 
+    )
     results = session.exec(statement).all()
     
     return [
@@ -70,7 +74,11 @@ def get_returnalyzer_data(session: Session = Depends(get_session)):
 @app.get("/api/defendants", response_model=List[dict])
 def get_all_defendants(session: Session = Depends(get_session)):
     # We join with CaseEntry to get Case Name and Case # for the table
-    statement = select(Defendant, CaseEntry).join(CaseEntry)
+    statement = (
+        select(Defendant, CaseEntry)
+        .join(CaseEntry)
+        .order_by(CaseEntry.id.asc(), Defendant.id.asc())
+    )
     results = session.exec(statement).all()
     
     return [
