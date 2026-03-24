@@ -5,10 +5,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 from typing import List
+from sqlalchemy.orm import selectinload
 
 # These imports assume 'database.py' and 'models/' are inside the 'app' folder
 from .database import get_session
-from .models.cases import CaseEntry
+from .models.cases import CaseEntry, Defendant, Plaintiff
 
 app = FastAPI(title="Returnalyzer API")
 
@@ -20,53 +21,106 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 2. API ROUTE
+# 2. API ROUTES
+
 @app.get("/api/cases", response_model=List[dict])
-def get_cases_for_returnalyzer(session: Session = Depends(get_session)):
-    statement = select(
-        CaseEntry.id, 
-        CaseEntry.case_name, 
-        CaseEntry.case_number, 
-        CaseEntry.litigation_status_id,
-        CaseEntry.state,
-        CaseEntry.county,
-        CaseEntry.case_class,
-        CaseEntry.type
-    )
+def get_returnalyzer_data(session: Session = Depends(get_session)):
+    # Fetch all CaseEntry records from the DB
+    statement = select(CaseEntry).options(selectinload(CaseEntry.defendants))
     results = session.exec(statement).all()
     
     return [
         {
-            "id": r.id,
+            # Existing Data from CaseEntry model
             "name": r.case_name,
-            "number": r.case_number,
+            "number": r.case_number or "N/A",
+            "location": f"{r.state} / {r.county}",
+            "defendants": r.current_number_of_defendants,
             "status": r.litigation_status_id,
-            "location": f"{r.state} / {r.county}" if r.state and r.county else "N/A",
-            "class": r.case_class,
-            "type": r.type
+            "discovery_ok": r.discovery_ok or "No",
+            
+            # --- FORMULATIONS ---
+            
+            # 1. Casewide Settlement (Settled)
+            "casewide_settled": sum(
+                d.settlement_amount for d in r.defendants 
+                if d.settlement_status == "Settled" and d.settlement_amount is not None
+            ),
+            
+            # 2. Casewide Settlement (In Discussion)
+            "casewide_discussion": sum(
+                d.settlement_amount for d in r.defendants 
+                if d.settlement_status == "In Discussion" and d.settlement_amount is not None
+            ),
+            
+            # 3. Lit Status Raw: $5000 if Discovery OK is "Yes", else $0
+            "discovery_raw": 5000.0 if r.discovery_ok == "Yes" else 0.0,
+            
+            # Formulation Placeholders
+            "lit_status_raw": 0.0,
+            "sum_case_values": 0.0,   
+            "sum_d_lit": "--", 
+            "sum_d_discovery": "--",
+            "gross_value": 0.0, 
+            "costs": r.filing_fee_amount or 0.0, 
+            "net_value": 0.0 
         } for r in results
+    ]
+    
+@app.get("/api/defendants", response_model=List[dict])
+def get_all_defendants(session: Session = Depends(get_session)):
+    # We join with CaseEntry to get Case Name and Case # for the table
+    statement = select(Defendant, CaseEntry).join(CaseEntry)
+    results = session.exec(statement).all()
+    
+    return [
+        {
+            "name": d.name,
+            "number": d.number,
+            "case_name": c.case_name,
+            "case_number": c.case_number or "N/A",
+            "location": f"{c.state} / {c.county}",
+            "litigation_status": d.litigation_status_id,
+            "service_status": d.service_status,
+            "settlement_status": d.settlement_status,
+            "discovery_status": d.discovery_status,
+            "settlement_amount": d.settlement_amount or 0.0,
+            
+            # --- NEW UPDATE: Discovery Status Value logic ---
+            "disc_val": 5000.0 if d.discovery_status == "Discovery Received" else 0.0,
+            
+            #PLACEHOLDERS for future formulations
+            "lit_val": "--", 
+            # "disc_val": "--"
+        } for d, c in results
     ]
 
 # 3. STATIC FILES & HTML SERVING
-# In Docker, your WORKDIR is /app. 
-# Your 'static' folder is at /app/static.
 STATIC_PATH = "/app/app/static"
-HTML_FILE_PATH = os.path.join(STATIC_PATH, "cases.html")
+CASES_HTML_PATH = os.path.join(STATIC_PATH, "cases.html")
+DEFENDANTS_HTML_PATH = os.path.join(STATIC_PATH, "defendants.html")
 
-# Mount the static directory so returnalyzer.js can be loaded
+# Mount the static directory
 if os.path.exists(STATIC_PATH):
     app.mount("/static", StaticFiles(directory=STATIC_PATH), name="static")
 
-# Serve the main HTML page for /cases
+# Serve the Cases page
 @app.get("/cases")
 async def serve_cases_page():
-    if os.path.exists(HTML_FILE_PATH):
-        return FileResponse(HTML_FILE_PATH)
-    return {"error": "cases.html not found in /app/static/"}
+    if os.path.exists(CASES_HTML_PATH):
+        return FileResponse(CASES_HTML_PATH)
+    return {"error": "cases.html not found"}
+
+# Serve the Defendants page
+@app.get("/defendants")
+async def serve_defendants_page():
+    if os.path.exists(DEFENDANTS_HTML_PATH):
+        return FileResponse(DEFENDANTS_HTML_PATH)
+    return {"error": "defendants.html not found"}
 
 # Root redirect to the cases page
 @app.get("/")
 async def root():
-    if os.path.exists(HTML_FILE_PATH):
-        return FileResponse(HTML_FILE_PATH)
-    return {"message": "Welcome to Returnalyzer API. Visit /cases for the UI."}
+    if os.path.exists(CASES_HTML_PATH):
+        return FileResponse(CASES_HTML_PATH)
+    return {"message": "Welcome to Returnalyzer API. Visit /cases or /defendants for the UI."}
