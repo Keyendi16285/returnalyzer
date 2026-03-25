@@ -3,15 +3,26 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from sqlmodel import Session, select
+from sqlmodel import Session, select, SQLModel  
 from typing import List
 from sqlalchemy.orm import selectinload
 
 # These imports assume 'database.py' and 'models/' are inside the 'app' folder
 from .database import get_session
-from .models.cases import CaseEntry, Defendant, Plaintiff
+from .models.cases import CaseEntry, Defendant, Plaintiff, CaseDriver
+from contextlib import asynccontextmanager
 
-app = FastAPI(title="Returnalyzer API")
+# --- LIFESPAN EVENT ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # This runs when the app starts
+    from .database import engine # Ensure engine is imported
+    SQLModel.metadata.create_all(engine) # Creates the CaseDriver table if it doesn't exist
+    with Session(engine) as session:
+        seed_drivers(session)
+    yield
+
+app = FastAPI(title="Returnalyzer API", lifespan=lifespan)
 
 # 1. CORS MIDDLEWARE
 app.add_middleware(
@@ -20,6 +31,43 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- SEEDING LOGIC ---
+def seed_drivers(session: Session):
+    # Check if we already have drivers to avoid duplicates
+    existing = session.exec(select(CaseDriver)).first()
+    if existing:
+        return
+
+    drivers_data = [
+        # Case Values
+        {"name": "raw_initial_a", "label": "Raw Initial case value (A)", "value": 2000.0, "category": "Case Values"},
+        {"name": "multiple_initial_a", "label": "Multiple initial case value (A)", "value": 3000.0, "category": "Case Values"},
+        {"name": "per_def_initial_a", "label": "Per Defendant Initial case value (A)", "value": 600.0, "category": "Case Values"},
+        {"name": "full_case_disc_b", "label": "Full Case Discovery Value (B)", "value": 5000.0, "category": "Case Values"},
+        {"name": "per_def_disc_c", "label": "Per Defendant discovery Value (C)", "value": 5000.0, "category": "Case Values"},
+        {"name": "m2d_case_d", "label": "M2D Case Value (D)", "value": 4000.0, "category": "Case Values"},
+        {"name": "m2d_per_def_d", "label": "M2D Case Value per Defendant (D)", "value": 2000.0, "category": "Case Values"},
+        {"name": "at_issue_case_e", "label": "At Issue Case Value (E)", "value": 8000.0, "category": "Case Values"},
+        {"name": "at_issue_per_def_e", "label": "At Issue Case Value per Defendant (E)", "value": 3000.0, "category": "Case Values"},
+        {"name": "msj_case_f", "label": "MSJ Case Value (F)", "value": 16000.0, "category": "Case Values"},
+        {"name": "msj_per_def_f", "label": "MSJ Case Value per Defendant (F)", "value": 5000.0, "category": "Case Values"},
+        {"name": "fee_pet_case_g", "label": "fee Petition Case Value (G)", "value": 20000.0, "category": "Case Values"},
+        {"name": "fee_pet_per_def_g", "label": "fee Petition Case Value per Defendant (G)", "value": 6000.0, "category": "Case Values"},
+        
+        # Probability Drivers (All at 80.00% / 0.8)
+        {"name": "prob_initial_a", "label": "Initial Case Value Probability (A)", "value": 0.8, "category": "Probability"},
+        {"name": "prob_m2d_d", "label": "M2D Phase Probability (D)", "value": 0.8, "category": "Probability"},
+        {"name": "prob_at_issue_e", "label": "At Issue Probability (E)", "value": 0.8, "category": "Probability"},
+        {"name": "prob_msj_f", "label": "MSJ Probability (F)", "value": 0.8, "category": "Probability"},
+        {"name": "prob_fee_pet_g", "label": "Fee petition probability (G)", "value": 0.8, "category": "Probability"},
+        {"name": "prob_disc_b", "label": "Discovery Probability (B)", "value": 0.8, "category": "Probability"},
+        {"name": "prob_disc_per_d_c", "label": "Discovery Probability per D (C)", "value": 0.8, "category": "Probability"},
+    ]
+
+    for item in drivers_data:
+        session.add(CaseDriver(**item))
+    session.commit()
 
 # 2. API ROUTES
 
@@ -73,7 +121,14 @@ def get_returnalyzer_data(session: Session = Depends(get_session)):
     
 @app.get("/api/defendants", response_model=List[dict])
 def get_all_defendants(session: Session = Depends(get_session)):
-    # We join with CaseEntry to get Case Name and Case # for the table
+    # 1. Fetch all drivers into a dictionary for quick access
+    drivers = session.exec(select(CaseDriver)).all()
+    d_map = {d.name: d.value for d in drivers}
+
+    # Helper to get value with a fallback to 0.0
+    def get_val(name): return d_map.get(name, 0.0)
+
+    # 2. Fetch Defendants joined with CaseEntry
     statement = (
         select(Defendant, CaseEntry)
         .join(CaseEntry)
@@ -81,32 +136,52 @@ def get_all_defendants(session: Session = Depends(get_session)):
     )
     results = session.exec(statement).all()
     
-    return [
-        {
+    output = []
+    for d, c in results:
+        # --- LITIGATION STATUS VALUE LOGIC ---
+        lit_val = 0.0
+        status = d.litigation_status_id
+        
+        if status in [3, 4, 6]:
+            lit_val = get_val("per_def_initial_a")      # Maps to ID 3 logic
+        elif status in [7, 8]:
+            lit_val = get_val("m2d_per_def_d")       # Maps to ID 7 logic
+        elif status == 9:
+            lit_val = get_val("at_issue_per_def_e")  # Maps to ID 9 logic
+        elif status == 11:
+            lit_val = get_val("msj_per_def_f")       # Maps to ID 11 logic
+        elif status == 12:
+            lit_val = get_val("fee_pet_per_def_g")   # Maps to ID 13 logic
+
+        output.append({
             "name": d.name,
             "number": d.number,
             "case_name": c.case_name,
             "case_number": c.case_number or "N/A",
             "location": f"{c.state} / {c.county}",
-            "litigation_status": d.litigation_status_id,
+            "litigation_status": status,
             "service_status": d.service_status,
             "settlement_status": d.settlement_status,
             "discovery_status": d.discovery_status,
             "settlement_amount": d.settlement_amount or 0.0,
             
-            # --- NEW UPDATE: Discovery Status Value logic ---
-            "disc_val": 5000.0 if d.discovery_status == "Discovery Received" else 0.0,
-            
-            #PLACEHOLDERS for future formulations
-            "lit_val": "--", 
-            # "disc_val": "--"
-        } for d, c in results
-    ]
+            # --- NEW ASSIGNMENTS ---
+            "lit_val": lit_val,
+            "disc_val": get_val("per_def_disc_c") if d.discovery_status == "Discovery Received" else 0.0
+        })
+        
+    return output
+    
+# API to get all driver values
+@app.get("/api/drivers")
+def get_drivers(session: Session = Depends(get_session)):
+    return session.exec(select(CaseDriver)).all()
 
 # 3. STATIC FILES & HTML SERVING
 STATIC_PATH = "/app/app/static"
 CASES_HTML_PATH = os.path.join(STATIC_PATH, "cases.html")
 DEFENDANTS_HTML_PATH = os.path.join(STATIC_PATH, "defendants.html")
+DRIVERS_HTML_PATH = os.path.join(STATIC_PATH, "drivers.html")
 
 # Mount the static directory
 if os.path.exists(STATIC_PATH):
@@ -125,6 +200,13 @@ async def serve_defendants_page():
     if os.path.exists(DEFENDANTS_HTML_PATH):
         return FileResponse(DEFENDANTS_HTML_PATH)
     return {"error": "defendants.html not found"}
+
+# Serve the Drivers page
+@app.get("/drivers")
+async def serve_drivers_page():
+    if os.path.exists(DRIVERS_HTML_PATH):
+        return FileResponse(DRIVERS_HTML_PATH)
+    return {"error": "drivers.html not found"}
 
 # Root redirect to the cases page
 @app.get("/")

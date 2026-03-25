@@ -73,6 +73,14 @@ class CaseEntryBase(SQLModel):
     settled_amount: Optional[float] = Field(default=None, ge=0)
     litigation_status_id: int
     filing_folder_url: str
+    
+    
+class CaseDriver(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True, unique=True)  # e.g., "msj_case_value"
+    label: str                                  # e.g., "MSJ Case Value (F)"
+    value: float                                # e.g., 16000.0
+    category: str                               # e.g., "Case Values" or "Probability"
 
 
 class CaseEntry(CaseEntryBase, table=True):

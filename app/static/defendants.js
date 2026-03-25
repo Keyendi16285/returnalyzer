@@ -59,7 +59,9 @@ async function fetchDefendants() {
                 <td class="p-3 text-slate-600">${d.settlement_status || 'None'}</td>
                 <td class="p-3 text-center text-slate-600">${d.discovery_status || 'None'}</td>
                 <td class="p-3 font-medium text-slate-800">$${d.settlement_amount.toLocaleString()}</td>
-                <td class="p-3 text-center text-slate-400">${d.lit_val}</td>
+                <td class="p-3 text-center text-slate-800 font-medium">
+                    ${typeof d.lit_val === 'number' ? '$' + d.lit_val.toLocaleString() : d.lit_val}
+                </td>
                 <td class="p-3 text-center text-slate-800 font-medium">
                 ${typeof d.disc_val === 'number' ? '$' + d.disc_val.toLocaleString() : d.disc_val}
                 </td>
