@@ -73,51 +73,79 @@ def seed_drivers(session: Session):
 
 @app.get("/api/cases", response_model=List[dict])
 def get_returnalyzer_data(session: Session = Depends(get_session)):
-    # Fetch all CaseEntry records from the DB
-    statement = (
-        select(CaseEntry)
-        .options(selectinload(CaseEntry.defendants))
-        .order_by(CaseEntry.id) 
-    )
+    # 1. Fetch drivers for dynamic values
+    drivers = session.exec(select(CaseDriver)).all()
+    d_map = {d.name: d.value for d in drivers}
+    def get_v(name): return d_map.get(name, 0.0)
+
+    # 2. Fetch Cases
+    statement = select(CaseEntry).options(selectinload(CaseEntry.defendants)).order_by(CaseEntry.id)
     results = session.exec(statement).all()
     
-    return [
-        {
-            # Existing Data from CaseEntry model
+    output = []
+    for r in results:
+        # --- A. DEFENDANT SUMS ---
+        sum_d_lit = 0.0
+        sum_d_discovery = 0.0
+        disc_driver_val = get_v("per_def_disc_c")
+
+        for d in r.defendants:
+            if d.settlement_status == "None":
+                status = d.litigation_status_id
+                if status in [3, 4, 6]: sum_d_lit += disc_driver_val
+                elif status in [7, 8]: sum_d_lit += get_v("m2d_per_def_d")
+                elif status == 9: sum_d_lit += get_v("at_issue_per_def_e")
+                elif status == 11: sum_d_lit += get_v("msj_per_def_f")
+                elif status == 12: sum_d_lit += get_v("fee_pet_per_def_g")
+
+                if d.discovery_status == "Discovery Received":
+                    sum_d_discovery += disc_driver_val
+
+        # --- B. CASE-WIDE VALUES ---
+        discovery_raw = get_v("full_case_disc_b") if r.discovery_ok == "Yes" else 0.0
+        
+        lit_status_raw = 0.0
+        if r.litigation_status_id in [3, 4, 6]:
+            lit_status_raw = get_v("raw_initial_a") if len(r.defendants) == 1 else get_v("multiple_initial_a")
+        elif r.litigation_status_id in [7, 8]: lit_status_raw = get_v("m2d_case_d")
+        elif r.litigation_status_id == 9: lit_status_raw = get_v("at_issue_case_e")
+        elif r.litigation_status_id == 11: lit_status_raw = get_v("msj_case_f")
+        elif r.litigation_status_id == 12: lit_status_raw = get_v("fee_pet_case_g")
+
+        # --- C. CALCULATE INTERMEDIATE SUMS ---
+        sum_case_values = lit_status_raw + sum_d_lit + discovery_raw + sum_d_discovery
+        casewide_settled = sum(d.settlement_amount for d in r.defendants if d.settlement_status == "Settled" and d.settlement_amount)
+        casewide_discussion = sum(d.settlement_amount for d in r.defendants if d.settlement_status == "In Discussion" and d.settlement_amount)
+
+        # --- D. GROSS & NET VALUES ---
+        gross_value = casewide_settled + casewide_discussion + sum_case_values
+        costs = r.filing_fee_amount or 0.0
+        
+        # FINAL CALCULATION
+        net_value = gross_value - costs
+
+        output.append({
             "name": r.case_name,
             "number": r.case_number or "N/A",
             "location": f"{r.state} / {r.county}",
-            "defendants": r.current_number_of_defendants,
+            "defendants": len(r.defendants),
             "status": r.litigation_status_id,
             "discovery_ok": r.discovery_ok or "No",
+            "discovery_raw": discovery_raw,
+            "lit_status_raw": lit_status_raw,
+            "sum_d_lit": sum_d_lit,
+            "sum_d_discovery": sum_d_discovery,
+            "sum_case_values": sum_case_values,
+            "casewide_settled": casewide_settled,
+            "casewide_discussion": casewide_discussion,
+            "gross_value": gross_value,
+            "costs": costs,
             
-            # --- FORMULATIONS ---
-            
-            # 1. Casewide Settlement (Settled)
-            "casewide_settled": sum(
-                d.settlement_amount for d in r.defendants 
-                if d.settlement_status == "Settled" and d.settlement_amount is not None
-            ),
-            
-            # 2. Casewide Settlement (In Discussion)
-            "casewide_discussion": sum(
-                d.settlement_amount for d in r.defendants 
-                if d.settlement_status == "In Discussion" and d.settlement_amount is not None
-            ),
-            
-            # 3. Lit Status Raw: $5000 if Discovery OK is "Yes", else $0
-            "discovery_raw": 5000.0 if r.discovery_ok == "Yes" else 0.0,
-            
-            # Formulation Placeholders
-            "lit_status_raw": 0.0,
-            "sum_case_values": 0.0,   
-            "sum_d_lit": "--", 
-            "sum_d_discovery": "--",
-            "gross_value": 0.0, 
-            "costs": r.filing_fee_amount or 0.0, 
-            "net_value": 0.0 
-        } for r in results
-    ]
+            # --- NEW ASSIGNMENT ---
+            "net_value": net_value
+        })
+        
+    return output
     
 @app.get("/api/defendants", response_model=List[dict])
 def get_all_defendants(session: Session = Depends(get_session)):
