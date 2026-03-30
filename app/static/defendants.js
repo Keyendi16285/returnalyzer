@@ -19,31 +19,56 @@ const litigationStatusMap = {
     17: "Settlement Dismissed"
 };
 
+/**
+ * Helper to format numbers as currency
+ */
+function formatCurrency(val) {
+    if (val === "--") return val;
+    return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+    }).format(val);
+}
+
 async function fetchDefendants() {
     const tableBody = document.getElementById('defendants-table-body');
     const counter = document.getElementById('defendant-count');
 
     try {
-        const response = await fetch('/api/defendants');
+        // 1. Get status from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const filterStatus = urlParams.get('status');
 
+        const response = await fetch('/api/defendants');
         if (!response.ok) throw new Error('Network response was not ok');
 
-        const data = await response.json();
+        const allData = await response.json();
+        let displayData = allData;
 
-        // --- UPDATE COUNTER ---
-        if (counter) {
-            counter.innerText = data.length;
+        // 2. Filter by the individual defendant's litigation status
+        if (filterStatus !== null) {
+            displayData = allData.filter(d => String(d.litigation_status) === String(filterStatus));
+            
+            // 3. UI Feedback: Show "Clear Filter" link if filtered
+            if (counter && !document.getElementById('clear-filter-link')) {
+                counter.insertAdjacentHTML('afterend', `
+                    <a id="clear-filter-link" href="/defendants" class="ml-4 text-[10px] uppercase font-black text-blue-600 hover:text-blue-800 tracking-wider">✕ Clear Filter</a>
+                `);
+            }
         }
 
-        if (data.length === 0) {
+        // 4. Update Counter
+        if (counter) counter.innerText = displayData.length;
+
+        // 5. Render rows
+        if (displayData.length === 0) {
             tableBody.innerHTML = `
-                <tr><td colspan="12" class="p-8 text-center text-slate-500">No defendant records found.</td></tr>
+                <tr><td colspan="12" class="p-12 text-center text-slate-400 italic">No defendants match this status.</td></tr>
             `;
             return;
         }
 
-        // Render Table Rows
-        tableBody.innerHTML = data.map(d => `
+        tableBody.innerHTML = displayData.map(d => `
             <tr class="hover:bg-blue-50/30 border-b border-slate-100 text-sm">
                 <td class="p-3 font-bold text-slate-800">${d.name}</td>
                 <td class="p-3 text-center text-slate-600">${d.number}</td>
@@ -58,23 +83,15 @@ async function fetchDefendants() {
                 <td class="p-3 text-slate-600">${d.service_status || 'None'}</td>
                 <td class="p-3 text-slate-600">${d.settlement_status || 'None'}</td>
                 <td class="p-3 text-center text-slate-600">${d.discovery_status || 'None'}</td>
-                <td class="p-3 font-medium text-slate-800">$${d.settlement_amount.toLocaleString()}</td>
-                <td class="p-3 text-center text-slate-800 font-medium">
-                    ${typeof d.lit_val === 'number' ? '$' + d.lit_val.toLocaleString() : d.lit_val}
-                </td>
-                <td class="p-3 text-center text-slate-800 font-medium">
-                ${typeof d.disc_val === 'number' ? '$' + d.disc_val.toLocaleString() : d.disc_val}
-                </td>
+                <td class="p-3 font-medium text-slate-800">${formatCurrency(d.settlement_amount)}</td>
+                <td class="p-3 text-center text-slate-800 font-medium">${formatCurrency(d.lit_val)}</td>
+                <td class="p-3 text-center text-slate-800 font-medium">${formatCurrency(d.disc_val)}</td>
             </tr>
         `).join('');
 
     } catch (error) {
-        console.error('Returnalyzer Error:', error);
-        if (tableBody) {
-            tableBody.innerHTML = `
-                <tr><td colspan="12" class="p-8 text-center text-red-500 font-bold">Failed to load defendants.</td></tr>
-            `;
-        }
+        console.error('Returnalyzer Fetch Error:', error);
+        tableBody.innerHTML = `<tr><td colspan="12" class="p-8 text-center text-red-500 font-bold">Error loading filtered defendants.</td></tr>`;
     }
 }
 

@@ -1,0 +1,61 @@
+// Map of Status IDs to Names (Ensure these match your database exactly)
+const statusNames = {
+    3: "Complaint Filed",
+    4: "Demandinator Sent",
+    6: "Served",
+    7: "Motion to Dismiss",
+    8: "Answer",
+    9: "At Issue",
+    11: "MSJ",
+    12: "Fee Petition",
+    14: "Judgement",
+    15: "Resolved",
+    16: "Closed",
+    17: "Settlement Dismissed"
+};
+
+const formatCurrency = (val) => {
+    return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        maximumFractionDigits: 0
+    }).format(val);
+};
+
+async function loadDashboard() {
+    try {
+        const response = await fetch('/api/dashboard/stats');
+        const data = await response.json();
+
+        // 1. Set Financials
+        document.getElementById('disposed-val').textContent = formatCurrency(data.financials.disposed);
+        document.getElementById('pending-val').textContent = formatCurrency(data.financials.pending);
+
+        // 2. Set Totals
+        document.getElementById('case-total').textContent = `${data.cases.total} TOTAL CASES`;
+        document.getElementById('def-total').textContent = `${data.defendants.total} TOTAL DEFENDANTS`;
+
+        // 3. Render Case Grid
+        const caseGrid = document.getElementById('case-grid');
+        caseGrid.innerHTML = Object.entries(data.cases.breakdown).map(([id, count]) => `
+            <a href="/cases?status=${id}" class="stat-card bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-blue-400">
+                <p class="text-[10px] uppercase font-bold text-slate-400 mb-1">${statusNames[id] || 'Status ' + id}</p>
+                <p class="text-2xl font-black text-slate-800">${count}</p>
+            </a>
+        `).join('');
+
+        // 4. Render Defendant Grid
+        const defGrid = document.getElementById('def-grid');
+        defGrid.innerHTML = Object.entries(data.defendants.breakdown).map(([id, count]) => `
+            <a href="/defendants?status=${id}" class="stat-card bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-green-400">
+                <p class="text-[10px] uppercase font-bold text-slate-400 mb-1">${statusNames[id] || 'Status ' + id}</p>
+                <p class="text-2xl font-black text-slate-800">${count}</p>
+            </a>
+        `).join('');
+
+    } catch (error) {
+        console.error("Dashboard Load Error:", error);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', loadDashboard);
