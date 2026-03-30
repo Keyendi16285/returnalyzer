@@ -58,4 +58,32 @@ async function loadDashboard() {
     }
 }
 
+/**
+ * Returnalyzer Global Hotkeys
+ * C = Cases, D = Defendants, V = Values/Drivers, H = Home
+ */
+document.addEventListener('keydown', function(event) {
+    // Prevent shortcuts from triggering if you are typing in a search box or input
+    if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+        return;
+    }
+
+    const key = event.key.toLowerCase();
+
+    switch(key) {
+        case 'c':
+            window.location.href = '/cases';
+            break;
+        case 'd':
+            window.location.href = '/defendants';
+            break;
+        case 'v':
+            window.location.href = '/drivers';
+            break;
+        case 'h':
+            window.location.href = '/';
+            break;
+    }
+});
+
 document.addEventListener('DOMContentLoaded', loadDashboard);
