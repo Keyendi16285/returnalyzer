@@ -1,11 +1,16 @@
 import os
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Response, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlmodel import Session, select, SQLModel  
 from typing import List
 from sqlalchemy.orm import selectinload
+from pydantic import BaseModel
+
+# Pydantic model for updating driver values
+class DriverUpdate(BaseModel):
+    value: float
 
 # These imports assume 'database.py' and 'models/' are inside the 'app' folder
 from .database import get_session
@@ -205,40 +210,252 @@ def get_all_defendants(session: Session = Depends(get_session)):
 def get_drivers(session: Session = Depends(get_session)):
     return session.exec(select(CaseDriver)).all()
 
-# 3. STATIC FILES & HTML SERVING
-STATIC_PATH = "/app/app/static"
-CASES_HTML_PATH = os.path.join(STATIC_PATH, "cases.html")
-DEFENDANTS_HTML_PATH = os.path.join(STATIC_PATH, "defendants.html")
-DRIVERS_HTML_PATH = os.path.join(STATIC_PATH, "drivers.html")
+# --- UPDATED DASHBOARD API (With Safety Nets) ---
+@app.get("/api/dashboard/stats")
+def get_dashboard_stats(session: Session = Depends(get_session)):
+    drivers = session.exec(select(CaseDriver)).all()
+    d_map = {d.name: d.value for d in drivers}
+    def get_v(name): return float(d_map.get(name, 0.0))
+
+    statement = select(CaseEntry).options(selectinload(CaseEntry.defendants))
+    cases = session.exec(statement).all()
+    all_defendants = session.exec(select(Defendant)).all()
+
+    disposed_value = 0.0
+    pending_value = 0.0
+    case_status_counts = {}
+
+    for c in cases:
+        sum_d_lit = 0.0
+        sum_d_discovery = 0.0
+        for d in c.defendants:
+            if d.settlement_status == "None":
+                st = d.litigation_status_id or 0
+                if st in [3, 4, 6]: sum_d_lit += get_v("per_def_disc_c")
+                elif st in [7, 8]: sum_d_lit += get_v("m2d_per_def_d")
+                elif st == 9: sum_d_lit += get_v("at_issue_per_def_e")
+                elif st == 11: sum_d_lit += get_v("msj_per_def_f")
+                elif st == 12: sum_d_lit += get_v("fee_pet_per_def_g")
+                if d.discovery_status == "Discovery Received":
+                    sum_d_discovery += get_v("per_def_disc_c")
+
+        discovery_raw = get_v("full_case_disc_b") if c.discovery_ok == "Yes" else 0.0
+        l_status = c.litigation_status_id or 0
+        lit_status_raw = 0.0
+        if l_status in [3, 4, 6]:
+            lit_status_raw = get_v("raw_initial_a") if len(c.defendants) == 1 else get_v("multiple_initial_a")
+        elif l_status in [7, 8]: lit_status_raw = get_v("m2d_case_d")
+        elif l_status == 9: lit_status_raw = get_v("at_issue_case_e")
+        elif l_status == 11: lit_status_raw = get_v("msj_case_f")
+        elif l_status == 12: lit_status_raw = get_v("fee_pet_case_g")
+
+        # Added (d.settlement_amount or 0.0) to prevent 500 errors on NULL values
+        c_settled = sum((d.settlement_amount or 0.0) for d in c.defendants if d.settlement_status == "Settled")
+        c_disc = sum((d.settlement_amount or 0.0) for d in c.defendants if d.settlement_status == "In Discussion")
+        
+        net_case_value = (c_settled + c_disc + lit_status_raw + sum_d_lit + discovery_raw + sum_d_discovery) - (c.filing_fee_amount or 0.0)
+
+        if l_status >= 14: disposed_value += net_case_value
+        else: pending_value += net_case_value
+
+        case_status_counts[l_status] = case_status_counts.get(l_status, 0) + 1
+
+    def_status_counts = {}
+    for d in all_defendants:
+        ds = d.litigation_status_id or 0
+        def_status_counts[ds] = def_status_counts.get(ds, 0) + 1
+
+    return {
+        "financials": {"disposed": disposed_value, "pending": pending_value},
+        "cases": {"total": len(cases), "breakdown": case_status_counts},
+        "defendants": {"total": len(all_defendants), "breakdown": def_status_counts}
+    }
+    
+@app.patch("/api/drivers/{driver_name}")
+def update_driver(driver_name: str, data: DriverUpdate, session: Session = Depends(get_session)):
+    # 1. Find the driver in the database by its unique name (e.g., 'msj_case_f')
+    statement = select(CaseDriver).where(CaseDriver.name == driver_name)
+    driver = session.exec(statement).first()
+    
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    
+    # 2. Update only the value field
+    driver.value = data.value
+    
+    # 3. Save to database
+    session.add(driver)
+    session.commit()
+    session.refresh(driver) # Refresh to get any DB-side changes
+    
+    return {"message": "Success", "updated_driver": driver.name, "new_value": driver.value}
+
+# --- 3. STATIC FILES & HTML SERVING ---
+
+# Update this path to match your actual structure inside Docker
+# If your Dockerfile WORKDIR is /app, and main.py is in /app/app/, 
+# then static is likely at /app/app/static
+STATIC_PATH = os.path.join(os.path.dirname(__file__), "static")
 
 # Mount the static directory
 if os.path.exists(STATIC_PATH):
     app.mount("/static", StaticFiles(directory=STATIC_PATH), name="static")
 
-# Serve the Cases page
+# Helper to serve files safely
+def safe_file_response(filename: str):
+    file_path = os.path.join(STATIC_PATH, filename)
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return {"error": f"{filename} not found at {file_path}"}
+
+@app.get("/", include_in_schema=False)
+async def serve_index():
+    return safe_file_response("index.html")
+
 @app.get("/cases")
 async def serve_cases_page():
-    if os.path.exists(CASES_HTML_PATH):
-        return FileResponse(CASES_HTML_PATH)
-    return {"error": "cases.html not found"}
+    return safe_file_response("cases.html")
 
-# Serve the Defendants page
 @app.get("/defendants")
 async def serve_defendants_page():
-    if os.path.exists(DEFENDANTS_HTML_PATH):
-        return FileResponse(DEFENDANTS_HTML_PATH)
-    return {"error": "defendants.html not found"}
+    return safe_file_response("defendants.html")
 
-# Serve the Drivers page
 @app.get("/drivers")
 async def serve_drivers_page():
-    if os.path.exists(DRIVERS_HTML_PATH):
-        return FileResponse(DRIVERS_HTML_PATH)
-    return {"error": "drivers.html not found"}
+    return safe_file_response("drivers.html")
 
-# Root redirect to the cases page
-@app.get("/")
-async def root():
-    if os.path.exists(CASES_HTML_PATH):
-        return FileResponse(CASES_HTML_PATH)
-    return {"message": "Welcome to Returnalyzer API. Visit /cases or /defendants for the UI."}
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return Response(content="", media_type="image/x-icon")
+
+# @app.get("/api/dashboard/stats")
+# def get_dashboard_stats(session: Session = Depends(get_session)):
+#     # 1. Fetch Drivers for Calculations
+#     drivers = session.exec(select(CaseDriver)).all()
+#     d_map = {d.name: d.value for d in drivers}
+#     def get_v(name): return float(d_map.get(name, 0.0))
+    
+#     statement = select(CaseEntry).options(selectinload(CaseEntry.defendants))
+#     cases = session.exec(statement).all()
+#     all_defendants = session.exec(select(Defendant)).all()
+
+#     # 2. Fetch All Cases & Defendants
+#     cases = session.exec(select(CaseEntry).options(selectinload(CaseEntry.defendants))).all()
+#     all_defendants = session.exec(select(Defendant)).all()
+
+#     # --- FINANCIAL TOTALS ---
+#     disposed_value = 0.0
+#     pending_value = 0.0
+    
+#     # --- CASE STATUS BREAKDOWN ---
+#     case_status_counts = {}
+
+#     for c in cases:
+#         # Re-use the Net Case Value Logic
+#         sum_d_lit = 0.0
+#         sum_d_discovery = 0.0
+#         for d in c.defendants:
+#             if d.settlement_status == "None":
+#                 st = d.litigation_status_id
+#                 if st in [3, 4, 6]: sum_d_lit += get_v("per_def_disc_c")
+#                 elif st in [7, 8]: sum_d_lit += get_v("m2d_per_def_d")
+#                 elif st == 9: sum_d_lit += get_v("at_issue_per_def_e")
+#                 elif st == 11: sum_d_lit += get_v("msj_per_def_f")
+#                 elif st == 12: sum_d_lit += get_v("fee_pet_per_def_g")
+#                 if d.discovery_status == "Discovery Received":
+#                     sum_d_discovery += get_v("per_def_disc_c")
+
+#         discovery_raw = get_v("full_case_disc_b") if c.discovery_ok == "Yes" else 0.0
+        
+#         # Lit Status Raw
+#         l_status = c.litigation_status_id or 0
+#         lit_status_raw = 0.0
+#         if l_status in [3, 4, 6]:
+#             lit_status_raw = get_v("raw_initial_a") if len(c.defendants) == 1 else get_v("multiple_initial_a")
+#         elif l_status in [7, 8]: lit_status_raw = get_v("m2d_case_d")
+#         elif l_status == 9: lit_status_raw = get_v("at_issue_case_e")
+#         elif l_status == 11: lit_status_raw = get_v("msj_case_f")
+#         elif l_status == 12: lit_status_raw = get_v("fee_pet_case_g")
+
+#         # sum_case_values = lit_status_raw + sum_d_lit + discovery_raw + sum_d_discovery
+#         c_settled = sum(d.settlement_amount for d in c.defendants if d.settlement_status == "Settled" and d.settlement_amount)
+#         c_disc = sum(d.settlement_amount for d in c.defendants if d.settlement_status == "In Discussion" and d.settlement_amount)
+        
+#         net_case_value = (c_settled + c_disc + sum_case_values) - (c.filing_fee_amount or 0.0)
+
+#         # Categorize by Status 14 (Disposed vs Pending)
+#         if l_status >= 14:
+#             disposed_value += net_case_value
+#         else:
+#             pending_value += net_case_value
+
+#         # Count Case Statuses
+#         case_status_counts[l_status] = case_status_counts.get(l_status, 0) + 1
+
+#     # --- DEFENDANT STATUS BREAKDOWN ---
+#     def_status_counts = {}
+#     for d in all_defendants:
+#         # Use the defendant's individual litigation status ID
+#         ds = d.litigation_status_id
+#         def_status_counts[ds] = def_status_counts.get(ds, 0) + 1
+
+#     return {
+#         "financials": {
+#             "disposed": disposed_value,
+#             "pending": pending_value
+#         },
+#         "cases": {
+#             "total": len(cases),
+#             "breakdown": case_status_counts
+#         },
+#         "defendants": {
+#             "total": len(all_defendants),
+#             "breakdown": def_status_counts
+#         }
+#     }
+
+# # 3. STATIC FILES & HTML SERVING
+# STATIC_PATH = "/app/app/static"
+# CASES_HTML_PATH = os.path.join(STATIC_PATH, "cases.html")
+# DEFENDANTS_HTML_PATH = os.path.join(STATIC_PATH, "defendants.html")
+# DRIVERS_HTML_PATH = os.path.join(STATIC_PATH, "drivers.html")
+# INDEX_HTML_PATH= os.path.join(STATIC_PATH, "index.html")
+
+# # Mount the static directory
+# if os.path.exists(STATIC_PATH):
+#     app.mount("/static", StaticFiles(directory=STATIC_PATH), name="static")
+    
+# # Serve the index page
+# @app.get("/", include_in_schema=False)
+# async def serve_index():
+#     if os.path.exists(INDEX_HTML_PATH):
+#         return FileResponse("static/index.html")
+#     return {"error": "index.html not found"}
+
+# # Serve the Cases page
+# @app.get("/cases")
+# async def serve_cases_page():
+#     if os.path.exists(CASES_HTML_PATH):
+#         return FileResponse(CASES_HTML_PATH)
+#     return {"error": "cases.html not found"}
+
+# # Serve the Defendants page
+# @app.get("/defendants")
+# async def serve_defendants_page():
+#     if os.path.exists(DEFENDANTS_HTML_PATH):
+#         return FileResponse(DEFENDANTS_HTML_PATH)
+#     return {"error": "defendants.html not found"}
+
+# # Serve the Drivers page
+# @app.get("/drivers")
+# async def serve_drivers_page():
+#     if os.path.exists(DRIVERS_HTML_PATH):
+#         return FileResponse(DRIVERS_HTML_PATH)
+#     return {"error": "drivers.html not found"}
+
+# # Root redirect to the cases page
+# @app.get("/")
+# async def root():
+#     if os.path.exists(CASES_HTML_PATH):
+#         return FileResponse(CASES_HTML_PATH)
+#     return {"message": "Welcome to Returnalyzer API. Visit /cases or /defendants for the UI."}

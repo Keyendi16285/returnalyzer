@@ -27,30 +27,50 @@ async function fetchCases() {
     const counter = document.getElementById('case-count');
 
     try {
+        // 1. Get the status from the URL (?status=11)
+        const urlParams = new URLSearchParams(window.location.search);
+        const filterStatus = urlParams.get('status');
+
         const response = await fetch('/api/cases');
-        
         if (!response.ok) throw new Error('Network response was not ok');
         
-        const cases = await response.json();
-        
-        // Update Counter
-        if (counter) counter.innerText = cases.length;
+        const allCases = await response.json();
+        let displayCases = allCases;
 
-        if (cases.length === 0) {
-            tableBody.innerHTML = `
-                <tr><td colspan="14" class="p-8 text-center text-slate-500">No records found in the shared database.</td></tr>
-            `;
-            return;
+        // 2. Filter logic: Strict string comparison
+        if (filterStatus !== null) {
+            displayCases = allCases.filter(c => String(c.status) === String(filterStatus));
+            
+            // 3. UI Feedback: Add a filter badge if it doesn't exist
+            const titleArea = document.querySelector('h1')?.parentElement;
+            if (titleArea && !document.getElementById('filter-badge')) {
+                const statusName = litigationStatusMap[filterStatus] || `Status ${filterStatus}`;
+                const badge = document.createElement('div');
+                badge.id = 'filter-badge';
+                badge.className = "mb-6 inline-flex items-center gap-2 px-3 py-1 bg-blue-600 text-white text-xs font-bold rounded-full shadow-lg transition-all";
+                badge.innerHTML = `
+                    FILTERING BY: ${statusName.toUpperCase()} 
+                    <a href="/cases" class="ml-2 hover:bg-blue-700 px-1.5 rounded-full bg-blue-500 font-black">✕</a>
+                `;
+                titleArea.appendChild(badge);
+            }
         }
 
-        // Render Table Rows
-        tableBody.innerHTML = cases.map(caseItem => renderCaseRow(caseItem)).join('');
+        // 4. Update the Total Count
+        if (counter) counter.innerText = displayCases.length;
+
+        // 5. Render to table
+        if (displayCases.length === 0) {
+            tableBody.innerHTML = `
+                <tr><td colspan="16" class="p-12 text-center text-slate-400 italic">No cases found for this status.</td></tr>
+            `;
+        } else {
+            tableBody.innerHTML = displayCases.map(caseItem => renderCaseRow(caseItem)).join('');
+        }
 
     } catch (error) {
-        console.error('Returnalyzer Error:', error);
-        tableBody.innerHTML = `
-            <tr><td colspan="14" class="p-8 text-center text-red-500 font-bold">Failed to load cases. Ensure the API is running correctly.</td></tr>
-        `;
+        console.error('Returnalyzer Fetch Error:', error);
+        tableBody.innerHTML = `<tr><td colspan="16" class="p-8 text-center text-red-500 font-bold">Error loading filtered cases.</td></tr>`;
     }
 }
 
@@ -70,7 +90,7 @@ function formatCurrency(val) {
  */
 function renderCaseRow(c) {
     const statusLabel = litigationStatusMap[c.status] || `Status ${c.status}`;
-    
+
     return `
         <tr class="hover:bg-blue-50/30 transition-colors border-b border-slate-100 text-sm">
             <td class="p-3 font-bold text-slate-800">${c.name}</td>
@@ -91,11 +111,11 @@ function renderCaseRow(c) {
             
             <td class="p-3 text-slate-700 font-medium text-center">${formatCurrency(c.lit_status_raw)}</td>
             
-            <td class="p-3 text-slate-700 font-medium text-center">${c.sum_d_lit}</td>
+            <td class="p-3 text-slate-700 font-medium text-center">${formatCurrency(c.sum_d_lit)}</td>
 
             <td class="p-3 text-slate-700 font-medium text-center">${formatCurrency(c.discovery_raw)}</td>
             
-            <td class="p-3 text-slate-700 font-medium text-center">${c.sum_d_discovery}</td>
+            <td class="p-3 text-slate-700 font-medium text-center">${formatCurrency(c.sum_d_discovery)}</td>
             
             <td class="p-3 text-slate-700 font-medium text-center">${formatCurrency(c.casewide_settled)}</td>
             
