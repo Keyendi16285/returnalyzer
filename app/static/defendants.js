@@ -35,41 +35,32 @@ async function fetchDefendants() {
     const counter = document.getElementById('defendant-count');
 
     try {
-        // 1. Get status from URL
         const urlParams = new URLSearchParams(window.location.search);
         const filterStatus = urlParams.get('status');
+        const filterClass = urlParams.get('case_class') || 'ALL';
 
-        const response = await fetch('/api/defendants');
+        updateFilterButtonUI(filterClass);
+
+        const apiUrl = filterClass === 'ALL' 
+            ? '/api/defendants' 
+            : `/api/defendants?case_class=${filterClass}`;
+
+        const response = await fetch(apiUrl);
         if (!response.ok) throw new Error('Network response was not ok');
 
         const allData = await response.json();
         let displayData = allData;
 
-        // 2. Filter by the individual defendant's litigation status
+        // Local status filter (for dashboard drill-down)
         if (filterStatus !== null) {
-            displayData = allData.filter(d => String(d.litigation_status) === String(filterStatus));
-            
-            // 3. UI Feedback: Show "Clear Filter" link if filtered
-            if (counter && !document.getElementById('clear-filter-link')) {
-                counter.insertAdjacentHTML('afterend', `
-                    <a id="clear-filter-link" href="/defendants" class="ml-4 text-[10px] uppercase font-black text-blue-600 hover:text-blue-800 tracking-wider">✕ Clear Filter</a>
-                `);
-            }
+            displayData = allData.filter(d => String(d.litigation_status_id) === String(filterStatus));
         }
 
-        // 4. Update Counter
         if (counter) counter.innerText = displayData.length;
-
-        // 5. Render rows
-        if (displayData.length === 0) {
-            tableBody.innerHTML = `
-                <tr><td colspan="12" class="p-12 text-center text-slate-400 italic">No defendants match this status.</td></tr>
-            `;
-            return;
-        }
 
         tableBody.innerHTML = displayData.map(d => `
             <tr class="hover:bg-blue-50/30 border-b border-slate-100 text-sm">
+                <td class="p-3 text-center text-slate-600">${d.id}</td>
                 <td class="p-3 font-bold text-slate-800">${d.name}</td>
                 <td class="p-3 text-center text-slate-600">${d.number}</td>
                 <td class="p-3 text-slate-700">${d.case_name}</td>
@@ -94,5 +85,33 @@ async function fetchDefendants() {
         tableBody.innerHTML = `<tr><td colspan="12" class="p-8 text-center text-red-500 font-bold">Error loading filtered defendants.</td></tr>`;
     }
 }
+
+window.filterByClass = function(className) {
+    const url = new URL(window.location);
+    url.searchParams.set('case_class', className);
+    url.searchParams.delete('status'); 
+    window.location.href = url.toString();
+};
+
+function updateFilterButtonUI(activeClass) {
+    document.querySelectorAll('.class-filter-btn').forEach(btn => {
+        btn.classList.remove('bg-blue-600', 'text-white');
+        btn.classList.add('text-slate-400');
+    });
+    const activeBtn = document.getElementById(`btn-class-${activeClass.toLowerCase()}`);
+    if (activeBtn) {
+        activeBtn.classList.add('bg-blue-600', 'text-white');
+        activeBtn.classList.remove('text-slate-400');
+    }
+}
+
+document.addEventListener('keydown', function(event) {
+    if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
+    const key = event.key.toLowerCase();
+    if (key === 'c') window.location.href = '/cases';
+    if (key === 'd') window.location.href = '/defendants';
+    if (key === 'v') window.location.href = '/drivers';
+    if (key === 'h') window.location.href = '/';
+});
 
 document.addEventListener('DOMContentLoaded', fetchDefendants);

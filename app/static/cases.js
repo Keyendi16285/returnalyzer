@@ -20,57 +20,83 @@ const litigationStatusMap = {
 };
 
 /**
- * Fetches cases from the Returnalyzer-specific API endpoint
+ * Main Fetch Function
+ * Orchestrates API calls and table rendering
  */
 async function fetchCases() {
     const tableBody = document.getElementById('cases-table-body');
     const counter = document.getElementById('case-count');
 
     try {
-        // 1. Get the status from the URL (?status=11)
+        // 1. Parse URL Parameters
         const urlParams = new URLSearchParams(window.location.search);
         const filterStatus = urlParams.get('status');
+        const filterClass = urlParams.get('case_class') || 'ALL'; // Default to ALL
 
-        const response = await fetch('/api/cases');
+        // 2. Sync Filter Button UI
+        updateFilterButtonUI(filterClass);
+
+        // 3. Construct API URL with Case Class filter
+        const apiUrl = filterClass === 'ALL' 
+            ? '/api/cases' 
+            : `/api/cases?case_class=${filterClass}`;
+
+        const response = await fetch(apiUrl);
         if (!response.ok) throw new Error('Network response was not ok');
         
         const allCases = await response.json();
         let displayCases = allCases;
 
-        // 2. Filter logic: Strict string comparison
+        // 4. Local Status Filtering (to support Dashboard drill-downs)
         if (filterStatus !== null) {
             displayCases = allCases.filter(c => String(c.status) === String(filterStatus));
             
-            // 3. UI Feedback: Add a filter badge if it doesn't exist
-            const titleArea = document.querySelector('h1')?.parentElement;
-            if (titleArea && !document.getElementById('filter-badge')) {
-                const statusName = litigationStatusMap[filterStatus] || `Status ${filterStatus}`;
-                const badge = document.createElement('div');
-                badge.id = 'filter-badge';
-                badge.className = "mb-6 inline-flex items-center gap-2 px-3 py-1 bg-blue-600 text-white text-xs font-bold rounded-full shadow-lg transition-all";
-                badge.innerHTML = `
-                    FILTERING BY: ${statusName.toUpperCase()} 
-                    <a href="/cases" class="ml-2 hover:bg-blue-700 px-1.5 rounded-full bg-blue-500 font-black">✕</a>
-                `;
-                titleArea.appendChild(badge);
-            }
+            // Optional: Update page title/badge to show which status is filtered
+            const statusLabel = litigationStatusMap[filterStatus] || `Status ${filterStatus}`;
+            console.log(`Filtering for Status: ${statusLabel}`);
         }
 
-        // 4. Update the Total Count
+        // 5. Update UI
         if (counter) counter.innerText = displayCases.length;
-
-        // 5. Render to table
-        if (displayCases.length === 0) {
-            tableBody.innerHTML = `
-                <tr><td colspan="16" class="p-12 text-center text-slate-400 italic">No cases found for this status.</td></tr>
-            `;
-        } else {
-            tableBody.innerHTML = displayCases.map(caseItem => renderCaseRow(caseItem)).join('');
-        }
+        
+        tableBody.innerHTML = displayCases.length === 0 
+            ? `<tr><td colspan="16" class="p-12 text-center text-slate-400 italic">No cases found matching these filters.</td></tr>`
+            : displayCases.map(caseItem => renderCaseRow(caseItem)).join('');
 
     } catch (error) {
         console.error('Returnalyzer Fetch Error:', error);
-        tableBody.innerHTML = `<tr><td colspan="16" class="p-8 text-center text-red-500 font-bold">Error loading filtered cases.</td></tr>`;
+        if (tableBody) {
+            tableBody.innerHTML = `<tr><td colspan="16" class="p-8 text-center text-red-500 font-bold">Error loading cases. Please check console.</td></tr>`;
+        }
+    }
+}
+
+/**
+ * Helper: Triggers page reload with new Case Class filter
+ */
+window.filterByClass = function(className) {
+    const url = new URL(window.location);
+    url.searchParams.set('case_class', className);
+    
+    // Reset status filter when changing class to avoid empty results
+    url.searchParams.delete('status'); 
+    
+    window.location.href = url.toString();
+};
+
+/**
+ * Helper: Updates CSS classes for the filter buttons
+ */
+function updateFilterButtonUI(activeClass) {
+    document.querySelectorAll('.class-filter-btn').forEach(btn => {
+        btn.classList.remove('bg-blue-600', 'text-white');
+        btn.classList.add('text-slate-400');
+    });
+    
+    const activeBtn = document.getElementById(`btn-class-${activeClass.toLowerCase()}`);
+    if (activeBtn) {
+        activeBtn.classList.add('bg-blue-600', 'text-white');
+        activeBtn.classList.remove('text-slate-400');
     }
 }
 
@@ -131,6 +157,18 @@ function renderCaseRow(c) {
         </tr>
     `;
 }
+
+/**
+ * Global Hotkeys
+ */
+document.addEventListener('keydown', function(event) {
+    if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
+    const key = event.key.toLowerCase();
+    if (key === 'c') window.location.href = '/cases';
+    if (key === 'd') window.location.href = '/defendants';
+    if (key === 'v') window.location.href = '/drivers';
+    if (key === 'h') window.location.href = '/';
+});
 
 // Initialize on load
 document.addEventListener('DOMContentLoaded', fetchCases);
