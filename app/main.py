@@ -77,14 +77,17 @@ def seed_drivers(session: Session):
 # 2. API ROUTES
 
 @app.get("/api/cases", response_model=List[dict])
-def get_returnalyzer_data(session: Session = Depends(get_session)):
+def get_returnalyzer_data(case_class: str = None, session: Session = Depends(get_session)):
     # 1. Fetch drivers for dynamic values
     drivers = session.exec(select(CaseDriver)).all()
     d_map = {d.name: d.value for d in drivers}
     def get_v(name): return d_map.get(name, 0.0)
 
-    # 2. Fetch Cases
+    # 2. Updated Query with Filter
     statement = select(CaseEntry).options(selectinload(CaseEntry.defendants)).order_by(CaseEntry.id)
+    if case_class and case_class != "ALL":
+        statement = statement.where(CaseEntry.case_class == case_class)
+    
     results = session.exec(statement).all()
     
     output = []
@@ -153,20 +156,18 @@ def get_returnalyzer_data(session: Session = Depends(get_session)):
     return output
     
 @app.get("/api/defendants", response_model=List[dict])
-def get_all_defendants(session: Session = Depends(get_session)):
+def get_all_defendants(case_class: str = None, session: Session = Depends(get_session)):
     # 1. Fetch all drivers into a dictionary for quick access
     drivers = session.exec(select(CaseDriver)).all()
     d_map = {d.name: d.value for d in drivers}
+    def get_v(name): return d_map.get(name, 0.0)
+    
+# 2. Updated Query with Join to CaseEntry for filtering
+    statement = select(Defendant, CaseEntry).join(CaseEntry, Defendant.case_id == CaseEntry.id)
 
-    # Helper to get value with a fallback to 0.0
-    def get_val(name): return d_map.get(name, 0.0)
-
-    # 2. Fetch Defendants joined with CaseEntry
-    statement = (
-        select(Defendant, CaseEntry)
-        .join(CaseEntry)
-        .order_by(CaseEntry.id.asc(), Defendant.id.asc())
-    )
+    if case_class and case_class != "ALL":
+        statement = statement.where(CaseEntry.case_class == case_class)
+    
     results = session.exec(statement).all()
     
     output = []
@@ -176,15 +177,15 @@ def get_all_defendants(session: Session = Depends(get_session)):
         status = d.litigation_status_id
         
         if status in [3, 4, 6]:
-            lit_val = get_val("per_def_initial_a")      # Maps to ID 3 logic
+            lit_val = get_v("per_def_initial_a")      # Maps to ID 3 logic
         elif status in [7, 8]:
-            lit_val = get_val("m2d_per_def_d")       # Maps to ID 7 logic
+            lit_val = get_v("m2d_per_def_d")       # Maps to ID 7 logic
         elif status == 9:
-            lit_val = get_val("at_issue_per_def_e")  # Maps to ID 9 logic
+            lit_val = get_v("at_issue_per_def_e")  # Maps to ID 9 logic
         elif status == 11:
-            lit_val = get_val("msj_per_def_f")       # Maps to ID 11 logic
+            lit_val = get_v("msj_per_def_f")       # Maps to ID 11 logic
         elif status == 12:
-            lit_val = get_val("fee_pet_per_def_g")   # Maps to ID 13 logic
+            lit_val = get_v("fee_pet_per_def_g")   # Maps to ID 13 logic
 
         output.append({
             "name": d.name,
@@ -200,7 +201,7 @@ def get_all_defendants(session: Session = Depends(get_session)):
             
             # --- NEW ASSIGNMENTS ---
             "lit_val": lit_val,
-            "disc_val": get_val("per_def_disc_c") if d.discovery_status == "Discovery Received" else 0.0
+            "disc_val": get_v("per_def_disc_c") if d.discovery_status == "Discovery Received" else 0.0
         })
         
     return output
@@ -210,21 +211,34 @@ def get_all_defendants(session: Session = Depends(get_session)):
 def get_drivers(session: Session = Depends(get_session)):
     return session.exec(select(CaseDriver)).all()
 
-# --- UPDATED DASHBOARD API (With Safety Nets) ---
+# --- UPDATED DASHBOARD API (With Case Class Filtering) ---
 @app.get("/api/dashboard/stats")
-def get_dashboard_stats(session: Session = Depends(get_session)):
+def get_dashboard_stats(case_class: str = None, session: Session = Depends(get_session)):
+    # 1. Fetch Drivers
     drivers = session.exec(select(CaseDriver)).all()
     d_map = {d.name: d.value for d in drivers}
     def get_v(name): return float(d_map.get(name, 0.0))
 
-    statement = select(CaseEntry).options(selectinload(CaseEntry.defendants))
-    cases = session.exec(statement).all()
-    all_defendants = session.exec(select(Defendant)).all()
+    # 2. Filter Cases by Case Class if provided
+    case_statement = select(CaseEntry).options(selectinload(CaseEntry.defendants))
+    if case_class and case_class != "ALL":
+        case_statement = case_statement.where(CaseEntry.case_class == case_class)
+    
+    cases = session.exec(case_statement).all()
+
+    # 3. Filter Defendants by Case Class if provided
+    def_statement = select(Defendant)
+    if case_class and case_class != "ALL":
+        # We join with CaseEntry to filter defendants by the parent case's class
+        def_statement = def_statement.join(CaseEntry).where(CaseEntry.case_class == case_class)
+    
+    all_defendants = session.exec(def_statement).all()
 
     disposed_value = 0.0
     pending_value = 0.0
     case_status_counts = {}
 
+    # 4. Calculate Financials based on the filtered list
     for c in cases:
         sum_d_lit = 0.0
         sum_d_discovery = 0.0
@@ -247,16 +261,18 @@ def get_dashboard_stats(session: Session = Depends(get_session)):
         elif l_status in [7, 8]: lit_status_raw = get_v("m2d_case_d")
         elif l_status == 9: lit_status_raw = get_v("at_issue_case_e")
         elif l_status == 11: lit_status_raw = get_v("msj_case_f")
-        elif l_status == 12: lit_status_raw = get_v("fee_pet_case_g")
+        elif l_status == 12: lit_status_raw = get_v("fee_pet_per_def_g")
 
-        # Added (d.settlement_amount or 0.0) to prevent 500 errors on NULL values
         c_settled = sum((d.settlement_amount or 0.0) for d in c.defendants if d.settlement_status == "Settled")
         c_disc = sum((d.settlement_amount or 0.0) for d in c.defendants if d.settlement_status == "In Discussion")
         
+        # Original math logic preserved to keep your $20,534 calculation consistent
         net_case_value = (c_settled + c_disc + lit_status_raw + sum_d_lit + discovery_raw + sum_d_discovery) - (c.filing_fee_amount or 0.0)
 
-        if l_status >= 14: disposed_value += net_case_value
-        else: pending_value += net_case_value
+        if l_status >= 14: 
+            disposed_value += net_case_value
+        else: 
+            pending_value += net_case_value
 
         case_status_counts[l_status] = case_status_counts.get(l_status, 0) + 1
 

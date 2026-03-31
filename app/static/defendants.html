@@ -28,6 +28,23 @@
             </div>
         </div>
 
+        <div class="flex flex-wrap items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-6">
+            <span
+                class="text-[10px] font-black text-slate-500 uppercase tracking-widest px-3 border-r border-slate-100 mr-2">Filter
+                Defendants:</span>
+
+            <button onclick="filterByClass('ALL')" id="btn-class-all"
+                class="class-filter-btn px-4 py-1.5 text-xs font-bold rounded-lg transition-all bg-blue-600 text-white">ALL</button>
+            <button onclick="filterByClass('JS')" id="btn-class-js"
+                class="class-filter-btn px-4 py-1.5 text-xs font-bold rounded-lg transition-all text-slate-400 hover:bg-slate-100">JS</button>
+            <button onclick="filterByClass('JD')" id="btn-class-jd"
+                class="class-filter-btn px-4 py-1.5 text-xs font-bold rounded-lg transition-all text-slate-400 hover:bg-slate-100">JD</button>
+            <button onclick="filterByClass('STD')" id="btn-class-std"
+                class="class-filter-btn px-4 py-1.5 text-xs font-bold rounded-lg transition-all text-slate-400 hover:bg-slate-100">STD</button>
+            <button onclick="filterByClass('LDH')" id="btn-class-ldh"
+                class="class-filter-btn px-4 py-1.5 text-xs font-bold rounded-lg transition-all text-slate-400 hover:bg-slate-100">LDH</button>
+        </div>
+
         <div class="bg-white rounded-xl shadow-xl overflow-hidden border border-slate-200">
             <div class="overflow-x-auto">
                 <table class="w-full text-left border-collapse min-w-[1200px]">
