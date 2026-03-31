@@ -86,7 +86,7 @@ document.addEventListener('keydown', function(event) {
     }
 });
 
-const CASETRACKER_URL = "https://casetracker.massfoiac.com"; // Change to your actual Casetracker URL
+const CASETRACKER_URL = "https://casetracker.massfoia.com"; // Change to your actual Casetracker URL
 
 (function() {
     const urlParams = new URLSearchParams(window.location.search);

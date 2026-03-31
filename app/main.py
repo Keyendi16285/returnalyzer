@@ -15,7 +15,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     # This will throw a 401 if the token is fake or expired
-    user = decode_token(token) 
+    user = decode_access_token(token)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid Session")
     return user
