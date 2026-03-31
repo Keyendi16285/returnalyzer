@@ -86,4 +86,28 @@ document.addEventListener('keydown', function(event) {
     }
 });
 
+const CASETRACKER_URL = "https://casetracker.massfoiac.com"; // Change to your actual Casetracker URL
+
+(function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const tokenFromUrl = urlParams.get('token');
+
+    // 1. If Casetracker just sent us back with a token
+    if (tokenFromUrl) {
+        localStorage.setItem('access_token', tokenFromUrl);
+        // Clean the URL so the token isn't sitting in the address bar
+        window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
+    // 2. Check if we have a token now
+    const token = localStorage.getItem('access_token');
+
+    if (!token) {
+        // Redirect to Casetracker with a redirect_url parameter 
+        // so Casetracker knows where to send the user after login
+        const returnUrl = encodeURIComponent(window.location.href);
+        window.location.href = `${CASETRACKER_URL}?redirect_url=${returnUrl}`;
+    }
+})();
+
 document.addEventListener('DOMContentLoaded', loadDashboard);

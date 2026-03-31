@@ -7,6 +7,18 @@ from sqlmodel import Session, select, SQLModel
 from typing import List
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from .utils.security import hash_password, verify_password, create_access_token, decode_access_token
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    # This will throw a 401 if the token is fake or expired
+    user = decode_token(token) 
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid Session")
+    return user
 
 # Pydantic model for updating driver values
 class DriverUpdate(BaseModel):
@@ -212,7 +224,7 @@ def get_drivers(session: Session = Depends(get_session)):
 
 # --- UPDATED DASHBOARD API (With Safety Nets) ---
 @app.get("/api/dashboard/stats")
-def get_dashboard_stats(session: Session = Depends(get_session)):
+def get_dashboard_stats( current_user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     drivers = session.exec(select(CaseDriver)).all()
     d_map = {d.name: d.value for d in drivers}
     def get_v(name): return float(d_map.get(name, 0.0))
