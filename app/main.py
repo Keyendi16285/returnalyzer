@@ -188,6 +188,7 @@ def get_all_defendants(case_class: str = None, session: Session = Depends(get_se
             lit_val = get_v("fee_pet_per_def_g")   # Maps to ID 13 logic
 
         output.append({
+            "id": d.id,
             "name": d.name,
             "number": d.number,
             "case_name": c.case_name,
