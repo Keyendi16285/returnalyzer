@@ -95,35 +95,35 @@ def get_returnalyzer_data(case_class: str = None, session: Session = Depends(get
         # --- A. DEFENDANT SUMS ---
         sum_d_lit = 0.0
         sum_d_discovery = 0.0
-        disc_driver_val = get_v("per_def_disc_c")
+        disc_driver_val = get_v("per_def_disc_c") * get_v("prob_disc_per_d_c")  # Discovery value per defendant (C) with probability
 
         for d in r.defendants:
             if d.settlement_status == "None":
                 status = d.litigation_status_id
                 if status in [3, 4, 6]: sum_d_lit += disc_driver_val
-                elif status in [7, 8]: sum_d_lit += get_v("m2d_per_def_d")
-                elif status == 9: sum_d_lit += get_v("at_issue_per_def_e")
-                elif status == 11: sum_d_lit += get_v("msj_per_def_f")
-                elif status == 12: sum_d_lit += get_v("fee_pet_per_def_g")
+                elif status in [7, 8]: sum_d_lit += get_v("m2d_per_def_d") * get_v("prob_m2d_d")
+                elif status == 9: sum_d_lit += get_v("at_issue_per_def_e") * get_v("prob_at_issue_e")
+                elif status == 11: sum_d_lit += get_v("msj_per_def_f") * get_v("prob_msj_f")
+                elif status == 12: sum_d_lit += get_v("fee_pet_per_def_g") * get_v("prob_fee_pet_g")
 
                 if d.discovery_status == "Discovery Received":
                     sum_d_discovery += disc_driver_val
 
         # --- B. CASE-WIDE VALUES ---
-        discovery_raw = get_v("full_case_disc_b") if r.discovery_ok == "Yes" else 0.0
+        discovery_raw = (get_v("full_case_disc_b") * get_v("prob_disc_b")) if r.discovery_ok == "Yes" else 0.0
         
         lit_status_raw = 0.0
         if r.litigation_status_id in [3, 4, 6]:
-            lit_status_raw = get_v("raw_initial_a") if len(r.defendants) == 1 else get_v("multiple_initial_a")
-        elif r.litigation_status_id in [7, 8]: lit_status_raw = get_v("m2d_case_d")
-        elif r.litigation_status_id == 9: lit_status_raw = get_v("at_issue_case_e")
-        elif r.litigation_status_id == 11: lit_status_raw = get_v("msj_case_f")
-        elif r.litigation_status_id == 12: lit_status_raw = get_v("fee_pet_case_g")
+            lit_status_raw = (get_v("raw_initial_a") * get_v("prob_initial_a")) if len(r.defendants) == 1 else (get_v("multiple_initial_a") * get_v("prob_multiple_initial_a"))
+        elif r.litigation_status_id in [7, 8]: lit_status_raw = get_v("m2d_case_d") * get_v("prob_m2d_d")
+        elif r.litigation_status_id == 9: lit_status_raw = get_v("at_issue_case_e") * get_v("prob_at_issue_e")
+        elif r.litigation_status_id == 11: lit_status_raw = get_v("msj_case_f") * get_v("prob_msj_f")
+        elif r.litigation_status_id == 12: lit_status_raw = get_v("fee_pet_case_g") * get_v("prob_fee_pet_g")
 
         # --- C. CALCULATE INTERMEDIATE SUMS ---
         sum_case_values = lit_status_raw + sum_d_lit + discovery_raw + sum_d_discovery
-        casewide_settled = sum(d.settlement_amount for d in r.defendants if d.settlement_status == "Settled" and d.settlement_amount)
-        casewide_discussion = sum(d.settlement_amount for d in r.defendants if d.settlement_status == "In Discussion" and d.settlement_amount)
+        casewide_settled = sum(d.settlement_amount for d in r.defendants if d.settlement_status in ["Settled", "Agreed in Principle"] and d.settlement_amount)
+        casewide_discussion = sum(d.settlement_amount for d in r.defendants if d.settlement_status == "In discussion" and d.settlement_amount)
 
         # --- D. GROSS & NET VALUES ---
         gross_value = casewide_settled + casewide_discussion + sum_case_values
@@ -177,15 +177,15 @@ def get_all_defendants(case_class: str = None, session: Session = Depends(get_se
         status = d.litigation_status_id
         
         if status in [3, 4, 6]:
-            lit_val = get_v("per_def_initial_a")      # Maps to ID 3 logic
+            lit_val = get_v("per_def_initial_a") * get_v("prob_initial_a")     # Maps to ID 3 logic
         elif status in [7, 8]:
-            lit_val = get_v("m2d_per_def_d")       # Maps to ID 7 logic
+            lit_val = get_v("m2d_per_def_d") * get_v("prob_m2d_d")      # Maps to ID 7 logic
         elif status == 9:
-            lit_val = get_v("at_issue_per_def_e")  # Maps to ID 9 logic
+            lit_val = get_v("at_issue_per_def_e") * get_v("prob_at_issue_e") # Maps to ID 9 logic
         elif status == 11:
-            lit_val = get_v("msj_per_def_f")       # Maps to ID 11 logic
+            lit_val = get_v("msj_per_def_f") * get_v("prob_msj_f")       # Maps to ID 11 logic
         elif status == 12:
-            lit_val = get_v("fee_pet_per_def_g")   # Maps to ID 13 logic
+            lit_val = get_v("fee_pet_per_def_g") * get_v("prob_fee_pet_g")   # Maps to ID 13 logic
 
         output.append({
             "id": d.id,
@@ -202,7 +202,7 @@ def get_all_defendants(case_class: str = None, session: Session = Depends(get_se
             
             # --- NEW ASSIGNMENTS ---
             "lit_val": lit_val,
-            "disc_val": get_v("per_def_disc_c") if d.discovery_status == "Discovery Received" else 0.0
+            "disc_val": (get_v("per_def_disc_c") * get_v("prob_per_def_disc_c")) if d.discovery_status == "Discovery Received" else 0.0
         })
         
     return output
