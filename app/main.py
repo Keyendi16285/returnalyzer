@@ -114,7 +114,7 @@ def get_returnalyzer_data(case_class: str = None, session: Session = Depends(get
         
         lit_status_raw = 0.0
         if r.litigation_status_id in [3, 4, 6]:
-            lit_status_raw = (get_v("raw_initial_a") * get_v("prob_initial_a")) if len(r.defendants) == 1 else (get_v("multiple_initial_a") * get_v("prob_multiple_initial_a"))
+            lit_status_raw = (get_v("raw_initial_a") * get_v("prob_initial_a")) if len(r.defendants) == 1 else (get_v("multiple_initial_a") * get_v("prob_initial_a"))
         elif r.litigation_status_id in [7, 8]: lit_status_raw = get_v("m2d_case_d") * get_v("prob_m2d_d")
         elif r.litigation_status_id == 9: lit_status_raw = get_v("at_issue_case_e") * get_v("prob_at_issue_e")
         elif r.litigation_status_id == 11: lit_status_raw = get_v("msj_case_f") * get_v("prob_msj_f")
